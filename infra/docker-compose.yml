@@ -1,0 +1,141 @@
+# AI Research Hub — Docker Compose(Phase 12~15)
+#
+# 默认(core):db + redis + kafka + backend + frontend + nginx
+# 监控:docker compose --profile monitoring up -d  → Prometheus(9090) + Grafana(3002)
+# Elasticsearch:docker compose --profile es up es  → 9200(可选,见 docs/decisions.md)
+#
+# 本机 Demo 用的是 E 盘原生组件(见 COMPONENTS.md);本文件面向可运行 Docker 的环境。
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: arh-postgres
+    environment:
+      POSTGRES_USER: aihub
+      POSTGRES_PASSWORD: aihub
+      POSTGRES_DB: ai_research_hub
+    ports:
+      - "5433:5432"
+    volumes:
+      - arh_pgdata:/var/lib/postgresql/data
+      - ../backend/src/main/resources/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aihub -d ai_research_hub"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: arh-redis
+    ports:
+      - "6379:6379"
+
+  kafka:
+    image: apache/kafka:4.0.0
+    container_name: arh-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - arh_kafka:/var/lib/kafka/data
+
+  backend:
+    build: ../backend
+    container_name: arh-backend
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      kafka:
+        condition: service_started
+    environment:
+      DATABASE_URL: jdbc:postgresql://db:5432/ai_research_hub
+      DATABASE_USERNAME: aihub
+      DATABASE_PASSWORD: aihub
+      REDIS_HOST: redis
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      PIPELINE_MODE: kafka
+      SEARCH_SPARSE: ${SEARCH_SPARSE:-postgres}
+      ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-http://elasticsearch:9200}
+      JWT_SECRET: ${JWT_SECRET:-please-override-with-a-real-secret-key-at-least-32-bytes}
+      CORS_ALLOWED_ORIGINS: http://localhost,http://localhost:3001
+      STORAGE_ROOT: /data/uploads
+      LLM_PROVIDER: ${LLM_PROVIDER:-extractive}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+    volumes:
+      - arh_uploads:/data/uploads
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build: ../frontend
+    container_name: arh-frontend
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_API_BASE: http://localhost:8080
+    ports:
+      - "3000:3000"
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: arh-nginx
+    depends_on:
+      - backend
+      - frontend
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+
+  # ---- Phase 15:Prometheus + Grafana(profile: monitoring) ----
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: arh-prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    profiles: ["monitoring"]
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: arh-grafana
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SERVER_HTTP_PORT: 3002
+    volumes:
+      - ./monitoring/grafana-datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml:ro
+    ports:
+      - "3002:3002"
+    profiles: ["monitoring"]
+
+  # ---- Phase 10:Elasticsearch(可选,profile: es) ----
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    container_name: arh-es
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms1g -Xmx1g
+    ports:
+      - "9200:9200"
+    profiles: ["es"]
+
+volumes:
+  arh_pgdata:
+  arh_kafka:
+  arh_uploads:

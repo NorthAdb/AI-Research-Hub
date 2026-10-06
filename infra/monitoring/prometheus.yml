@@ -1,0 +1,9 @@
+# Phase 15:Prometheus 抓取 Spring Boot Actuator 的 Prometheus 端点
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: ai-research-hub-backend
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["backend:8080"]

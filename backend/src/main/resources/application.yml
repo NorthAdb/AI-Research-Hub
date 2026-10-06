@@ -1,0 +1,116 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: ai-research-hub
+
+  datasource:
+    # 配置外置:可用环境变量 DATABASE_URL / DATABASE_USERNAME / DATABASE_PASSWORD 覆盖
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5433/ai_research_hub}
+    username: ${DATABASE_USERNAME:aihub}
+    password: ${DATABASE_PASSWORD:aihub}
+  jpa:
+    hibernate:
+      ddl-auto: validate   # Schema 由 db/schema.sql 管理,详见 docs/database.md
+    open-in-view: false
+    properties:
+      hibernate.jdbc.time_zone: UTC
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 25MB
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2s
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    consumer:
+      group-id: ai-research-hub-worker
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+app:
+  jwt:
+    # 生产环境必须通过环境变量 JWT_SECRET 覆盖(至少 32 字节)
+    secret: ${JWT_SECRET:dev-only-secret-key-change-me-ai-research-hub-0123456789abcdef}
+    ttl-hours: 24
+  auth:
+    # local=本服务签发 JWT;supabase=只校验 Supabase 的 JWT secret,不在这里签发
+    issuer: ${AUTH_ISSUER:local}
+    supabase-jwt-secret: ${SUPABASE_JWT_SECRET:}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3001,http://localhost:3002}
+  storage:
+    # local=本地磁盘(默认);supabase=Supabase Storage REST
+    provider: ${STORAGE_PROVIDER:local}
+    root: ${STORAGE_ROOT:./data/uploads}
+    supabase-url: ${SUPABASE_URL:}
+    supabase-service-role-key: ${SUPABASE_SERVICE_ROLE_KEY:}
+    bucket: ${SUPABASE_STORAGE_BUCKET:documents}
+  rag:
+    chunk-size: ${RAG_CHUNK_SIZE:800}
+    chunk-overlap: ${RAG_CHUNK_OVERLAP:100}
+    top-k: ${RAG_TOP_K:5}
+  search:
+    candidate-limit: ${SEARCH_CANDIDATE_LIMIT:30}
+    rrf-k: ${SEARCH_RRF_K:60}
+    # postgres=PostgreSQL 全文(默认);elasticsearch=同一套 bigram 写到 Elasticsearch
+    sparse: ${SEARCH_SPARSE:postgres}
+    elasticsearch-url: ${ELASTICSEARCH_URL:http://localhost:9200}
+  embedding:
+    # local=演示级词面哈希向量(零依赖);openai=OpenAI 兼容 /embeddings
+    # 维度必须等于 document_chunks.embedding 的 vector(768)。
+    # 硅基流动 BAAI/bge-base-zh-v1.5 是 768 维;bge-m3 是 1024,不能直接套用。
+    provider: ${EMBEDDING_PROVIDER:local}
+    dims: ${EMBEDDING_DIMS:768}
+    base-url: ${EMBEDDING_BASE_URL:https://api.siliconflow.cn/v1}
+    model: ${EMBEDDING_MODEL:BAAI/bge-base-zh-v1.5}
+    api-key: ${EMBEDDING_API_KEY:}
+    timeout-seconds: ${EMBEDDING_TIMEOUT_SECONDS:60}
+  llm:
+    # extractive=无 Key 兜底(抽取式);openai=OpenAI 兼容 /chat/completions
+    provider: ${LLM_PROVIDER:extractive}
+    base-url: ${LLM_BASE_URL:https://api.deepseek.com/v1}
+    model: ${LLM_MODEL:deepseek-chat}
+    api-key: ${LLM_API_KEY:}
+    timeout-seconds: ${LLM_TIMEOUT_SECONDS:60}
+  reranker:
+    # lexical=词面重合度(默认,无 Key);api=Cohere/硅基流动兼容的 /rerank
+    provider: ${RERANKER_PROVIDER:lexical}
+    base-url: ${RERANKER_BASE_URL:https://api.siliconflow.cn/v1}
+    model: ${RERANKER_MODEL:BAAI/bge-reranker-v2-m3}
+    api-key: ${RERANKER_API_KEY:}
+    timeout-seconds: ${RERANKER_TIMEOUT_SECONDS:30}
+  pipeline:
+    # inline=进程内异步(默认);kafka=Phase 5 Worker
+    mode: ${PIPELINE_MODE:inline}
+  kafka:
+    topic: ${KAFKA_DOCUMENT_TOPIC:document.process}
+  chat-cache:
+    ttl-seconds: ${CHAT_CACHE_TTL_SECONDS:3600}
+  agent:
+    # rule=规则式大脑(默认,无 Key 可复现)
+    # llm=OpenAI 兼容工具调用,必须同时配置 LLM_API_KEY;问答的 LLM_PROVIDER 可以仍是 extractive
+    brain: ${AGENT_BRAIN:rule}
+    max-steps: ${AGENT_MAX_STEPS:6}
+
+# Phase 10: Actuator / Prometheus
+management:
+  health:
+    # inline 模式不依赖 Kafka。Broker 没开时不要把整个应用标成 DOWN。
+    kafka:
+      enabled: ${KAFKA_HEALTH_ENABLED:false}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  metrics:
+    tags:
+      application: ai-research-hub

@@ -1,0 +1,25 @@
+# === AI Research Hub ===
+
+# 后端
+backend/target/
+backend/server.log
+backend/data/uploads/
+
+# 前端
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# 本地环境与数据
+.env
+*.log
+
+# 临时测试产物
+.tmp-test/
+infra/.run/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+.DS_Store
